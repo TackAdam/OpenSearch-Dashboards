@@ -48,15 +48,38 @@ export interface SpanFilter {
 
 export interface TraceDetailsProps {
   setMenuMountPoint?: (mount: MountPoint | undefined) => void;
+  // New props for embedded mode
+  isEmbedded?: boolean;
+  traceId?: string;
+  dataSourceId?: string;
+  indexPattern?: string;
+  initialSpanId?: string;
+  onStateChange?: (state: any) => void;
 }
 
-export const TraceDetails: React.FC<TraceDetailsProps> = ({ setMenuMountPoint }) => {
+export const TraceDetails: React.FC<TraceDetailsProps> = ({ 
+  setMenuMountPoint,
+  isEmbedded = false,
+  traceId: propTraceId,
+  dataSourceId: propDataSourceId,
+  indexPattern: propIndexPattern,
+  initialSpanId,
+  onStateChange
+}) => {
   const {
     services: { chrome, data, osdUrlStateStorage },
   } = useOpenSearchDashboards<DataExplorerServices>();
 
-  // Initialize URL state management
+  // Initialize URL state management only if not embedded
   const { stateContainer, stopStateSync } = useMemo(() => {
+    if (isEmbedded) {
+      // Return dummy objects for embedded mode
+      return {
+        stateContainer: null,
+        stopStateSync: () => {}
+      };
+    }
+    
     return createTraceAppState({
       stateDefaults: {
         traceId: '',
@@ -66,14 +89,32 @@ export const TraceDetails: React.FC<TraceDetailsProps> = ({ setMenuMountPoint })
       },
       osdUrlStateStorage: osdUrlStateStorage!,
     });
-  }, [osdUrlStateStorage]);
+  }, [osdUrlStateStorage, isEmbedded]);
 
-  // Get current state values and subscribe to changes
-  const [appState, setAppState] = useState(() => stateContainer.get());
+  // State management - use props in embedded mode, URL state otherwise
+  const [appState, setAppState] = useState(() => {
+    if (isEmbedded) {
+      return {
+        traceId: propTraceId || '',
+        dataSourceId: propDataSourceId || '',
+        indexPattern: propIndexPattern || 'otel-v1-apm-span-*',
+        spanId: initialSpanId || undefined,
+      };
+    }
+    return stateContainer?.get() || {
+      traceId: '',
+      dataSourceId: '',
+      indexPattern: 'otel-v1-apm-span-*',
+      spanId: undefined,
+    };
+  });
+
   const { traceId, dataSourceId, indexPattern, spanId } = appState;
 
-  // Subscribe to state changes
+  // Subscribe to state changes only if not embedded
   useEffect(() => {
+    if (isEmbedded || !stateContainer) return;
+
     const subscription = stateContainer.state$.subscribe((newState) => {
       setAppState(newState);
     });
@@ -81,7 +122,25 @@ export const TraceDetails: React.FC<TraceDetailsProps> = ({ setMenuMountPoint })
     return () => {
       subscription.unsubscribe();
     };
-  }, [stateContainer]);
+  }, [stateContainer, isEmbedded]);
+
+  // Update state when props change in embedded mode
+  useEffect(() => {
+    if (isEmbedded) {
+      const newState = {
+        traceId: propTraceId || '',
+        dataSourceId: propDataSourceId || '',
+        indexPattern: propIndexPattern || 'otel-v1-apm-span-*',
+        spanId: appState.spanId, // Preserve current span selection
+      };
+      setAppState(newState);
+      
+      // Notify parent of state changes
+      if (onStateChange) {
+        onStateChange(newState);
+      }
+    }
+  }, [isEmbedded, propTraceId, propDataSourceId, propIndexPattern, onStateChange, appState.spanId]);
 
   const [transformedHits, setTransformedHits] = useState<TraceHit[]>([]);
   const [spanFilters, setSpanFilters] = useState<SpanFilter[]>([]);
@@ -208,15 +267,24 @@ export const TraceDetails: React.FC<TraceDetailsProps> = ({ setMenuMountPoint })
 
   // Update URL state when fallback span selection occurs
   useEffect(() => {
-    if (selectedSpan && selectedSpan.spanId !== spanId) {
+    if (selectedSpan && selectedSpan.spanId !== spanId && !isEmbedded && stateContainer) {
       // Only update if the selected span is different from the current spanId
       // This handles the case where filtering causes the original span to disappear
       stateContainer.transitions.setSpanId(selectedSpan.spanId);
     }
-  }, [selectedSpan, spanId, stateContainer]);
+  }, [selectedSpan, spanId, stateContainer, isEmbedded]);
 
   const handleSpanSelect = (selectedSpanId: string) => {
-    stateContainer.transitions.setSpanId(selectedSpanId);
+    if (isEmbedded) {
+      // In embedded mode, update local state
+      setAppState(prev => ({ ...prev, spanId: selectedSpanId }));
+      if (onStateChange) {
+        onStateChange({ ...appState, spanId: selectedSpanId });
+      }
+    } else if (stateContainer) {
+      // In standalone mode, update URL state
+      stateContainer.transitions.setSpanId(selectedSpanId);
+    }
   };
 
   // Force re-render of visualizations when container size changes
@@ -274,9 +342,9 @@ export const TraceDetails: React.FC<TraceDetailsProps> = ({ setMenuMountPoint })
     return `${filter.field}: ${filter.value}`;
   };
 
-  // Set up ResizeObserver to detect when the main panel size changes
+  // Set up ResizeObserver to detect when the main panel size changes (only in standalone mode)
   useEffect(() => {
-    if (!mainPanelRef.current) return;
+    if (!mainPanelRef.current || isEmbedded) return;
 
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -292,11 +360,13 @@ export const TraceDetails: React.FC<TraceDetailsProps> = ({ setMenuMountPoint })
     return () => {
       resizeObserver.disconnect();
     };
-  }, [forceVisualizationResize]);
+  }, [forceVisualizationResize, isEmbedded]);
 
   return (
     <>
-      <TraceTopNavMenu payloadData={transformedHits} setMenuMountPoint={setMenuMountPoint} />
+      {!isEmbedded && (
+        <TraceTopNavMenu payloadData={transformedHits} setMenuMountPoint={setMenuMountPoint} />
+      )}
 
       {isLoading ? (
         <EuiPanel paddingSize="l">
@@ -377,79 +447,144 @@ export const TraceDetails: React.FC<TraceDetailsProps> = ({ setMenuMountPoint })
                 </div>
               )}
 
-              {/* Resizable container underneath filter badges */}
-              <EuiResizableContainer
-                direction="horizontal"
-                className="exploreTraceView__resizableContainer"
-              >
-                {(EuiResizablePanel, EuiResizableButton) => (
-                  <>
-                    <EuiResizablePanel initialSize={70} minSize="50%" wrapperPadding="none">
-                      <EuiPanel paddingSize="s" className="exploreTraceView__contentPanel">
-                        {/* Tab content */}
-                        <div ref={mainPanelRef} className="exploreTraceView__mainPanel">
-                          {activeTab === 'service_map' && (
-                            <div style={{ height: 'calc(100vh - 200px)', overflow: 'hidden' }}>
-                              <ServiceMap
-                                hits={transformedHits}
-                                colorMap={colorMap}
-                                paddingSize="none"
-                                hasShadow={false}
-                                selectedSpanId={spanId}
-                              />
-                            </div>
-                          )}
-
-                          {(activeTab === 'timeline' ||
-                            activeTab === 'span_list' ||
-                            activeTab === 'tree_view') && (
-                            <SpanDetailPanel
-                              key={`span-panel-${visualizationKey}`}
-                              chrome={chrome}
-                              spanFilters={spanFilters}
-                              setSpanFiltersWithStorage={setSpanFiltersWithStorage}
-                              payloadData={JSON.stringify(transformedHits)}
-                              isGanttChartLoading={isBackgroundLoading}
-                              dataSourceMDSId={dataSourceId}
-                              dataSourceMDSLabel={undefined}
-                              traceId={traceId}
-                              pplService={pplService}
-                              indexPattern={indexPattern}
-                              colorMap={colorMap}
-                              onSpanSelect={handleSpanSelect}
-                              selectedSpanId={spanId}
-                              activeView={activeTab}
-                            />
-                          )}
+              {/* Layout container - horizontal for standalone, vertical for embedded */}
+              {isEmbedded ? (
+                // Vertical layout for embedded mode
+                <div className="exploreTraceView__embeddedContainer">
+                  <EuiPanel paddingSize="s" className="exploreTraceView__contentPanel exploreTraceView__embeddedMainContent">
+                    {/* Tab content */}
+                    <div ref={mainPanelRef} className="exploreTraceView__mainPanel">
+                      {activeTab === 'service_map' && (
+                        <div style={{ minHeight: '300px', height: 'auto' }}>
+                          <ServiceMap
+                            hits={transformedHits}
+                            colorMap={colorMap}
+                            paddingSize="none"
+                            hasShadow={false}
+                            selectedSpanId={spanId}
+                          />
                         </div>
-                      </EuiPanel>
-                    </EuiResizablePanel>
+                      )}
 
-                    <EuiResizableButton />
-
-                    <EuiResizablePanel initialSize={30} minSize="300px">
-                      <EuiPanel paddingSize="s" className="exploreTraceView__sidebarPanel">
-                        <SpanDetailTabs
-                          selectedSpan={selectedSpan}
-                          addSpanFilter={(field: string, value: string | number | boolean) => {
-                            const newFilters = [...spanFilters];
-                            const index = newFilters.findIndex(
-                              ({ field: filterField }) => field === filterField
-                            );
-                            if (index === -1) {
-                              newFilters.push({ field, value });
-                            } else {
-                              newFilters.splice(index, 1, { field, value });
-                            }
-                            setSpanFiltersWithStorage(newFilters);
-                          }}
-                          setCurrentSpan={handleSpanSelect}
+                      {(activeTab === 'timeline' ||
+                        activeTab === 'span_list' ||
+                        activeTab === 'tree_view') && (
+                        <SpanDetailPanel
+                          key={`span-panel-${visualizationKey}`}
+                          chrome={chrome}
+                          spanFilters={spanFilters}
+                          setSpanFiltersWithStorage={setSpanFiltersWithStorage}
+                          payloadData={JSON.stringify(transformedHits)}
+                          isGanttChartLoading={isBackgroundLoading}
+                          dataSourceMDSId={dataSourceId}
+                          dataSourceMDSLabel={undefined}
+                          traceId={traceId}
+                          pplService={pplService}
+                          indexPattern={indexPattern}
+                          colorMap={colorMap}
+                          onSpanSelect={handleSpanSelect}
+                          selectedSpanId={spanId}
+                          activeView={activeTab}
                         />
-                      </EuiPanel>
-                    </EuiResizablePanel>
-                  </>
-                )}
-              </EuiResizableContainer>
+                      )}
+                    </div>
+                  </EuiPanel>
+
+                  {/* Span details below the main content in embedded mode */}
+                  <EuiPanel paddingSize="s" className="exploreTraceView__embeddedSpanDetails">
+                    <SpanDetailTabs
+                      selectedSpan={selectedSpan}
+                      addSpanFilter={(field: string, value: string | number | boolean) => {
+                        const newFilters = [...spanFilters];
+                        const index = newFilters.findIndex(
+                          ({ field: filterField }) => field === filterField
+                        );
+                        if (index === -1) {
+                          newFilters.push({ field, value });
+                        } else {
+                          newFilters.splice(index, 1, { field, value });
+                        }
+                        setSpanFiltersWithStorage(newFilters);
+                      }}
+                      setCurrentSpan={handleSpanSelect}
+                    />
+                  </EuiPanel>
+                </div>
+              ) : (
+                // Horizontal resizable layout for standalone mode
+                <EuiResizableContainer
+                  direction="horizontal"
+                  className="exploreTraceView__resizableContainer"
+                >
+                  {(EuiResizablePanel, EuiResizableButton) => (
+                    <>
+                      <EuiResizablePanel initialSize={70} minSize="50%" wrapperPadding="none">
+                        <EuiPanel paddingSize="s" className="exploreTraceView__contentPanel">
+                          {/* Tab content */}
+                          <div ref={mainPanelRef} className="exploreTraceView__mainPanel">
+                            {activeTab === 'service_map' && (
+                              <div style={{ height: 'calc(100vh - 200px)', overflow: 'hidden' }}>
+                                <ServiceMap
+                                  hits={transformedHits}
+                                  colorMap={colorMap}
+                                  paddingSize="none"
+                                  hasShadow={false}
+                                  selectedSpanId={spanId}
+                                />
+                              </div>
+                            )}
+
+                            {(activeTab === 'timeline' ||
+                              activeTab === 'span_list' ||
+                              activeTab === 'tree_view') && (
+                              <SpanDetailPanel
+                                key={`span-panel-${visualizationKey}`}
+                                chrome={chrome}
+                                spanFilters={spanFilters}
+                                setSpanFiltersWithStorage={setSpanFiltersWithStorage}
+                                payloadData={JSON.stringify(transformedHits)}
+                                isGanttChartLoading={isBackgroundLoading}
+                                dataSourceMDSId={dataSourceId}
+                                dataSourceMDSLabel={undefined}
+                                traceId={traceId}
+                                pplService={pplService}
+                                indexPattern={indexPattern}
+                                colorMap={colorMap}
+                                onSpanSelect={handleSpanSelect}
+                                selectedSpanId={spanId}
+                                activeView={activeTab}
+                              />
+                            )}
+                          </div>
+                        </EuiPanel>
+                      </EuiResizablePanel>
+
+                      <EuiResizableButton />
+
+                      <EuiResizablePanel initialSize={30} minSize="300px">
+                        <EuiPanel paddingSize="s" className="exploreTraceView__sidebarPanel">
+                          <SpanDetailTabs
+                            selectedSpan={selectedSpan}
+                            addSpanFilter={(field: string, value: string | number | boolean) => {
+                              const newFilters = [...spanFilters];
+                              const index = newFilters.findIndex(
+                                ({ field: filterField }) => field === filterField
+                              );
+                              if (index === -1) {
+                                newFilters.push({ field, value });
+                              } else {
+                                newFilters.splice(index, 1, { field, value });
+                              }
+                              setSpanFiltersWithStorage(newFilters);
+                            }}
+                            setCurrentSpan={handleSpanSelect}
+                          />
+                        </EuiPanel>
+                      </EuiResizablePanel>
+                    </>
+                  )}
+                </EuiResizableContainer>
+              )}
             </>
           )}
         </>

@@ -46,6 +46,7 @@ import { getPreloadedStore } from './application/utils/state_management/store';
 import { buildServices } from './build_services';
 import { DocViewTable } from './components/doc_viewer/doc_viewer_table/table';
 import { JsonCodeBlock } from './components/doc_viewer/json_code_block/json_code_block';
+import { TraceDetailsView } from './components/doc_viewer/trace_details_view/trace_details_view';
 import {
   createQueryEditorExtensionConfig,
   SHOW_CLASSIC_DISCOVER_LOCAL_STORAGE_KEY,
@@ -127,6 +128,14 @@ export class ExplorePlugin
       }),
       order: 20,
       component: JsonCodeBlock,
+    });
+
+    this.docViewsRegistry.addDocView({
+      title: i18n.translate('explore.docViews.traceDetails.title', {
+        defaultMessage: 'Trace Details',
+      }),
+      order: 30,
+      component: TraceDetailsView,
     });
     this.docViewsLinksRegistry = new DocViewsLinksRegistry();
     setDocViewsLinksRegistry(this.docViewsLinksRegistry);

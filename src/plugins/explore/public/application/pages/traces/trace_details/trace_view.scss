@@ -36,4 +36,32 @@
     height: 16px;
     border-radius: 2px;
   }
+
+  // Embedded mode styles - horizontal layout like the original page
+  &__embeddedContainer {
+    display: flex;
+    flex-direction: row; // Horizontal layout
+    gap: 16px;
+    height: calc(100vh - 200px); // Account for header and other UI elements
+  }
+
+  &__embeddedMainContent {
+    flex: 1; // Take remaining space after span details
+    overflow: hidden; // Prevent content from expanding beyond allocated space
+    
+    .exploreTraceView__mainPanel {
+      height: 100%;
+      overflow-y: auto; // Make gantt chart scrollable when there are too many spans
+    }
+  }
+
+  &__embeddedSpanDetails {
+    flex: 0 0 400px; // Fixed width like the original page
+    overflow: hidden; // Prevent content from expanding beyond allocated space
+    
+    .euiPanel {
+      height: 100%;
+      overflow-y: auto; // Make span details scrollable if needed
+    }
+  }
 }

@@ -143,6 +143,7 @@ export const registerBuiltInTabs = (tabRegistry: TabRegistryService, services: E
 
     component: VisTab,
   });
+
 };
 
 /**

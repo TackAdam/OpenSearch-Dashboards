@@ -369,15 +369,21 @@ export class DatasetService {
 
     const dataType = this.typesRegistry.get(DEFAULT_DATA.SET_TYPES.INDEX_PATTERN);
     if (dataType) {
+      const meta: any = {
+        type: DATA_STRUCTURE_META_TYPES.CUSTOM,
+      };
+
+      // Only include displayName if it has a value
+      if (indexPattern.displayName) {
+        meta.displayName = indexPattern.displayName;
+      }
+
       const dataset = dataType.toDataset([
         {
           id: indexPattern.id,
           title: indexPattern.title,
           type: DEFAULT_DATA.SET_TYPES.INDEX_PATTERN,
-          meta: {
-            type: DATA_STRUCTURE_META_TYPES.CUSTOM,
-            displayName: indexPattern.displayName,
-          },
+          meta,
           parent: dataSource
             ? {
                 id: dataSource.id,

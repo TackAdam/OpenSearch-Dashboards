@@ -32,10 +32,9 @@ export const indexPatternTypeConfig: DatasetTypeConfig = {
     const pattern = path[path.length - 1];
     const patternMeta = pattern.meta as DataStructureCustomMeta;
 
-    return {
+    const dataset: Dataset = {
       id: pattern.id,
       title: pattern.title,
-      displayName: patternMeta?.displayName,
       type: DEFAULT_DATA.SET_TYPES.INDEX_PATTERN,
       timeFieldName: patternMeta?.timeFieldName,
       isRemoteDataset: pattern?.title?.includes(':') ?? false,
@@ -47,6 +46,13 @@ export const indexPatternTypeConfig: DatasetTypeConfig = {
           }
         : undefined,
     } as Dataset;
+
+    // Only include displayName if it has a value
+    if (patternMeta?.displayName) {
+      dataset.displayName = patternMeta.displayName;
+    }
+
+    return dataset;
   },
 
   fetch: async (services, path) => {

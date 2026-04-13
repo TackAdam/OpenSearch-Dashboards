@@ -52,13 +52,19 @@ export class DefaultDslDataSource extends DataSource<
 
     return {
       dataSets: savedObjectLst.map((savedObject: SavedObject<IndexPatternSavedObjectAttrs>) => {
-        return {
+        const dataSet: any = {
           id: savedObject.id,
           title: savedObject.attributes.title,
-          displayName: savedObject.attributes.displayName,
           // @ts-expect-error TS2345 TODO(ts-error): fixme
           dataSourceId: getDataSourceReference(savedObject.references)?.id,
         };
+
+        // Only include displayName if it has a value
+        if (savedObject.attributes.displayName) {
+          dataSet.displayName = savedObject.attributes.displayName;
+        }
+
+        return dataSet;
       }),
     };
   }
